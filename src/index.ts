@@ -330,14 +330,14 @@ app.all('*', async (c) => {
       }
     });
     
-    // Handle close events
+    // Handle close events (structured log for wrangler tail / debugging)
     serverWs.addEventListener('close', (event) => {
-      console.log('[WS] Client closed:', event.code, event.reason);
+      console.error('[WS] close', JSON.stringify({ side: 'client', code: event.code, reason: event.reason || '(none)' }));
       containerWs.close(event.code, event.reason);
     });
     
     containerWs.addEventListener('close', (event) => {
-      console.log('[WS] Container closed:', event.code, event.reason);
+      console.error('[WS] close', JSON.stringify({ side: 'container', code: event.code, reason: event.reason || '(none)' }));
       // Transform the close reason (truncate to 123 bytes max for WebSocket spec)
       let reason = transformErrorMessage(event.reason, url.host);
       if (reason.length > 123) {
@@ -347,14 +347,14 @@ app.all('*', async (c) => {
       serverWs.close(event.code, reason);
     });
     
-    // Handle errors
+    // Handle errors (structured log for wrangler tail / debugging)
     serverWs.addEventListener('error', (event) => {
-      console.error('[WS] Client error:', event);
+      console.error('[WS] error', JSON.stringify({ side: 'client', message: event instanceof ErrorEvent ? event.message : String(event) }));
       containerWs.close(1011, 'Client error');
     });
     
     containerWs.addEventListener('error', (event) => {
-      console.error('[WS] Container error:', event);
+      console.error('[WS] error', JSON.stringify({ side: 'container', message: event instanceof ErrorEvent ? event.message : String(event) }));
       serverWs.close(1011, 'Container error');
     });
     
@@ -404,6 +404,37 @@ async function scheduled(
 }
 
 export default {
-  fetch: app.fetch,
+  // 一時的なデバッグ用エンドポイント
+  async fetch(
+    request: Request,
+    env: MoltbotEnv,
+    ctx: ExecutionContext
+  ): Promise<Response> {
+    const url = new URL(request.url);
+
+    // GET /debug にアクセスした時だけ、内部変数の状態を返す
+    if (url.pathname === '/debug') {
+      return new Response(
+        JSON.stringify(
+          {
+            expected_team: env.CF_ACCESS_TEAM_DOMAIN,
+            expected_aud: env.CF_ACCESS_AUD,
+            has_anthropic_key: !!env.ANTHROPIC_API_KEY,
+            url_attempted: request.url,
+          },
+          null,
+          2
+        ),
+        {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+    }
+
+    // 通常の処理は既存の Hono アプリに委譲
+    return app.fetch(request, env, ctx);
+  },
   scheduled,
 };
