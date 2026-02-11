@@ -6,7 +6,7 @@ import { sanitizeStderr } from '../utils/sanitize';
 
 /**
  * Public routes - NO Cloudflare Access authentication required
- * 
+ *
  * These routes are mounted BEFORE the auth middleware is applied.
  * Includes: health checks, static assets, and public API endpoints.
  */
@@ -57,9 +57,10 @@ publicRoutes.get('/api/status', async (c) => {
     debugInfo.processCount = processes.length;
 
     const gatewayProc = processes.find(
-      p =>
-        (p.command.includes('start-moltbot.sh') || p.command.includes('clawdbot gateway')) &&
-        !p.command.includes('clawdbot devices')
+      (p) =>
+        (p.command.includes('start-openclaw.sh') || p.command.includes('start-moltbot.sh') ||
+          p.command.includes('openclaw gateway') || p.command.includes('clawdbot gateway')) &&
+        !p.command.includes('openclaw devices') && !p.command.includes('clawdbot devices')
     );
     if (gatewayProc) {
       debugInfo.gatewayProcess = {
