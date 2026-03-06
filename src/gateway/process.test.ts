@@ -1,7 +1,50 @@
 import { describe, it, expect, vi } from 'vitest';
-import { findExistingMoltbotProcess } from './process';
+import { findExistingMoltbotProcess, isGatewayProcessCommand } from './process';
 import type { Sandbox, Process } from '@cloudflare/sandbox';
 import { createMockSandbox } from '../test-utils';
+
+describe('isGatewayProcessCommand', () => {
+  it('returns true for start-openclaw.sh', () => {
+    expect(isGatewayProcessCommand('/usr/local/bin/start-openclaw.sh')).toBe(true);
+  });
+
+  it('returns true for openclaw gateway', () => {
+    expect(isGatewayProcessCommand('openclaw gateway --port 18789')).toBe(true);
+  });
+
+  it('returns true for start-moltbot.sh (legacy)', () => {
+    expect(isGatewayProcessCommand('/usr/local/bin/start-moltbot.sh')).toBe(true);
+  });
+
+  it('returns true for clawdbot gateway (legacy)', () => {
+    expect(isGatewayProcessCommand('clawdbot gateway --port 18789')).toBe(true);
+  });
+
+  it('returns false for openclaw devices', () => {
+    expect(isGatewayProcessCommand('openclaw devices list --json')).toBe(false);
+  });
+
+  it('returns false for clawdbot devices', () => {
+    expect(isGatewayProcessCommand('clawdbot devices list')).toBe(false);
+  });
+
+  it('returns false for openclaw --version', () => {
+    expect(isGatewayProcessCommand('openclaw --version')).toBe(false);
+  });
+
+  it('returns false for clawdbot --version', () => {
+    expect(isGatewayProcessCommand('clawdbot --version')).toBe(false);
+  });
+
+  it('returns false for openclaw onboard', () => {
+    expect(isGatewayProcessCommand('openclaw onboard --non-interactive')).toBe(false);
+  });
+
+  it('returns false for unrelated commands', () => {
+    expect(isGatewayProcessCommand('node --version')).toBe(false);
+    expect(isGatewayProcessCommand('cat /root/.openclaw/openclaw.json')).toBe(false);
+  });
+});
 
 function createFullMockProcess(overrides: Partial<Process> = {}): Process {
   return {

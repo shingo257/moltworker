@@ -5,6 +5,25 @@ import { buildEnvVars } from './env';
 import { ensureRcloneConfig } from './r2';
 
 /**
+ * Returns true if the command string is a gateway process (start-openclaw.sh, openclaw gateway,
+ * or legacy start-moltbot.sh / clawdbot gateway) and not a CLI command (devices, --version, onboard).
+ */
+export function isGatewayProcessCommand(command: string): boolean {
+  const isGateway =
+    command.includes('start-openclaw.sh') ||
+    command.includes('openclaw gateway') ||
+    command.includes('start-moltbot.sh') ||
+    command.includes('clawdbot gateway');
+  const isCli =
+    command.includes('openclaw devices') ||
+    command.includes('openclaw --version') ||
+    command.includes('openclaw onboard') ||
+    command.includes('clawdbot devices') ||
+    command.includes('clawdbot --version');
+  return isGateway && !isCli;
+}
+
+/**
  * Find an existing OpenClaw gateway process
  *
  * @param sandbox - The sandbox instance
@@ -14,22 +33,7 @@ export async function findExistingMoltbotProcess(sandbox: Sandbox): Promise<Proc
   try {
     const processes = await sandbox.listProcesses();
     for (const proc of processes) {
-      // Match gateway process (openclaw gateway or legacy clawdbot gateway)
-      // Don't match CLI commands like "openclaw devices list"
-      const isGatewayProcess =
-        proc.command.includes('start-openclaw.sh') ||
-        proc.command.includes('openclaw gateway') ||
-        // Legacy: match old startup script during transition
-        proc.command.includes('start-moltbot.sh') ||
-        proc.command.includes('clawdbot gateway');
-      const isCliCommand =
-        proc.command.includes('openclaw devices') ||
-        proc.command.includes('openclaw --version') ||
-        proc.command.includes('openclaw onboard') ||
-        proc.command.includes('clawdbot devices') ||
-        proc.command.includes('clawdbot --version');
-
-      if (isGatewayProcess && !isCliCommand) {
+      if (isGatewayProcessCommand(proc.command)) {
         if (proc.status === 'starting' || proc.status === 'running') {
           return proc;
         }
@@ -39,6 +43,33 @@ export async function findExistingMoltbotProcess(sandbox: Sandbox): Promise<Proc
     console.log('Could not list processes:', e);
   }
   return null;
+}
+
+/**
+ * Get the most recent failed gateway starter process and its logs.
+ * A "failed" process is one with status 'failed' or status 'completed' with non-zero exitCode.
+ *
+ * @param sandbox - The sandbox instance
+ * @returns { process, logs } for the most recent failed gateway starter, or null if none
+ */
+export async function getLastFailedGatewayStarter(
+  sandbox: Sandbox,
+): Promise<{ process: Process; logs: { stdout: string; stderr: string } } | null> {
+  try {
+    const processes = await sandbox.listProcesses();
+    const failed = processes.filter(
+      (p) =>
+        isGatewayProcessCommand(p.command) &&
+        (p.status === 'failed' || (p.status === 'completed' && p.exitCode != null && p.exitCode !== 0)),
+    );
+    if (failed.length === 0) return null;
+    failed.sort((a, b) => (b.startTime?.getTime() ?? 0) - (a.startTime?.getTime() ?? 0));
+    const proc = failed[0];
+    const logs = await proc.getLogs();
+    return { process: proc, logs: { stdout: logs.stdout || '', stderr: logs.stderr || '' } };
+  } catch {
+    return null;
+  }
 }
 
 /**

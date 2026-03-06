@@ -87,6 +87,8 @@ Current test coverage:
 - `gateway/process.test.ts` - Process finding logic
 - `gateway/r2.test.ts` - R2 mounting logic
 - `gateway/sync.test.ts` - R2 backup sync logic
+- `logging.test.ts` - Logging utilities (redact etc.)
+- `utils/sanitize.test.ts` - stderr sanitization for API responses
 
 When adding new functionality, add corresponding tests.
 
@@ -245,6 +247,11 @@ npx wrangler secret list
 ```
 
 Enable debug routes with `DEBUG_ROUTES=true` and check `/debug/processes`.
+
+### Sandbox / wrangler
+
+- **SANDBOX_TRANSPORT=websocket** is set in `wrangler.jsonc` vars so the Sandbox SDK multiplexes operations over one WebSocket (avoids subrequest limits when doing many listProcesses/getLogs calls). See [Transport modes](https://developers.cloudflare.com/sandbox/configuration/transport/).
+- **wrangler dev** has known WebSocket proxy limitations through the sandbox; HTTP works but Control UI WebSocket may fail. Deploy to Cloudflare for full functionality.
 
 ## Troubleshooting
 

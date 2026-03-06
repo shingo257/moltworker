@@ -21,10 +21,11 @@
  */
 
 import { Hono } from 'hono';
-import { getSandbox, Sandbox, type SandboxOptions } from '@cloudflare/sandbox';
+import { getSandbox, Sandbox } from '@cloudflare/sandbox';
 
-import type { AppEnv, MoltbotEnv } from './types';
-import { MOLTBOT_PORT } from './config';
+import type { AppEnv } from './types';
+import { buildSandboxOptions, MOLTBOT_PORT, validateRequiredEnv } from './config';
+import { transformErrorMessage } from './utils/ws-errors';
 import { createAccessMiddleware } from './auth';
 import { ensureMoltbotGateway, findExistingMoltbotProcess } from './gateway';
 import { publicRoutes, api, adminUi, debug, cdp } from './routes';
@@ -32,87 +33,7 @@ import { redactSensitiveParams } from './utils/logging';
 import loadingPageHtml from './assets/loading.html';
 import configErrorHtml from './assets/config-error.html';
 
-/**
- * Transform error messages from the gateway to be more user-friendly.
- */
-function transformErrorMessage(message: string, host: string): string {
-  if (message.includes('gateway token missing') || message.includes('gateway token mismatch')) {
-    return `Invalid or missing token. Visit https://${host}?token={REPLACE_WITH_YOUR_TOKEN}`;
-  }
-
-  if (message.includes('pairing required')) {
-    return `Pairing required. Visit https://${host}/_admin/`;
-  }
-
-  return message;
-}
-
 export { Sandbox };
-
-/**
- * Validate required environment variables.
- * Returns an array of missing variable descriptions, or empty array if all are set.
- */
-function validateRequiredEnv(env: MoltbotEnv): string[] {
-  const missing: string[] = [];
-  const isTestMode = env.DEV_MODE === 'true' || env.E2E_TEST_MODE === 'true';
-
-  if (!env.MOLTBOT_GATEWAY_TOKEN) {
-    missing.push('MOLTBOT_GATEWAY_TOKEN');
-  }
-
-  // CF Access vars not required in dev/test mode since auth is skipped
-  if (!isTestMode) {
-    if (!env.CF_ACCESS_TEAM_DOMAIN) {
-      missing.push('CF_ACCESS_TEAM_DOMAIN');
-    }
-
-    if (!env.CF_ACCESS_AUD) {
-      missing.push('CF_ACCESS_AUD');
-    }
-  }
-
-  // Check for AI provider configuration (at least one must be set)
-  const hasCloudflareGateway = !!(
-    env.CLOUDFLARE_AI_GATEWAY_API_KEY &&
-    env.CF_AI_GATEWAY_ACCOUNT_ID &&
-    env.CF_AI_GATEWAY_GATEWAY_ID
-  );
-  const hasLegacyGateway = !!(env.AI_GATEWAY_API_KEY && env.AI_GATEWAY_BASE_URL);
-  const hasAnthropicKey = !!env.ANTHROPIC_API_KEY;
-  const hasOpenAIKey = !!env.OPENAI_API_KEY;
-
-  if (!hasCloudflareGateway && !hasLegacyGateway && !hasAnthropicKey && !hasOpenAIKey) {
-    missing.push(
-      'ANTHROPIC_API_KEY, OPENAI_API_KEY, or CLOUDFLARE_AI_GATEWAY_API_KEY + CF_AI_GATEWAY_ACCOUNT_ID + CF_AI_GATEWAY_GATEWAY_ID',
-    );
-  }
-
-  return missing;
-}
-
-/**
- * Build sandbox options based on environment configuration.
- *
- * SANDBOX_SLEEP_AFTER controls how long the container stays alive after inactivity:
- * - 'never' (default): Container stays alive indefinitely (recommended due to long cold starts)
- * - Duration string: e.g., '10m', '1h', '30s' - container sleeps after this period of inactivity
- *
- * To reduce costs at the expense of cold start latency, set SANDBOX_SLEEP_AFTER to a duration:
- *   npx wrangler secret put SANDBOX_SLEEP_AFTER
- *   # Enter: 10m (or 1h, 30m, etc.)
- */
-function buildSandboxOptions(env: MoltbotEnv): SandboxOptions {
-  const sleepAfter = env.SANDBOX_SLEEP_AFTER?.toLowerCase() || 'never';
-
-  // 'never' means keep the container alive indefinitely
-  if (sleepAfter === 'never') {
-    return { keepAlive: true };
-  }
-
-  // Otherwise, use the specified duration
-  return { sleepAfter };
-}
 
 // Main app
 const app = new Hono<AppEnv>();

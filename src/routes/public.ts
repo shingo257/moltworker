@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { MOLTBOT_PORT } from '../config';
-import { findExistingMoltbotProcess } from '../gateway';
+import { findExistingMoltbotProcess, isGatewayProcessCommand } from '../gateway';
 import { sanitizeStderr } from '../utils/sanitize';
 
 /**
@@ -56,12 +56,7 @@ publicRoutes.get('/api/status', async (c) => {
     const processes = await sandbox.listProcesses();
     debugInfo.processCount = processes.length;
 
-    const gatewayProc = processes.find(
-      (p) =>
-        (p.command.includes('start-openclaw.sh') || p.command.includes('start-moltbot.sh') ||
-          p.command.includes('openclaw gateway') || p.command.includes('clawdbot gateway')) &&
-        !p.command.includes('openclaw devices') && !p.command.includes('clawdbot devices')
-    );
+    const gatewayProc = processes.find((p) => isGatewayProcessCommand(p.command));
     if (gatewayProc) {
       debugInfo.gatewayProcess = {
         command: gatewayProc.command,

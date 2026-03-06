@@ -1,6 +1,12 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
-import { ensureMoltbotGateway, findExistingMoltbotProcess, waitForProcess } from '../gateway';
+import {
+  ensureMoltbotGateway,
+  findExistingMoltbotProcess,
+  getLastFailedGatewayStarter,
+  isGatewayProcessCommand,
+  waitForProcess,
+} from '../gateway';
 import { sanitizeStderr } from '../utils/sanitize';
 
 /**
@@ -23,23 +29,17 @@ debug.get('/start-gateway', async (c) => {
     });
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
-    // Try to attach logs from the most recent failed start-moltbot process
     let lastFailed: Record<string, unknown> | null = null;
     try {
-      const processes = await sandbox.listProcesses();
-      const starter = processes
-        .filter(p => (p.command.includes('start-openclaw.sh') || p.command.includes('start-moltbot.sh')) &&
-          (p.status === 'failed' || p.status === 'completed'))
-        .sort((a, b) => (b.startTime?.getTime() ?? 0) - (a.startTime?.getTime() ?? 0))[0];
-      if (starter) {
-        const logs = await starter.getLogs();
+      const result = await getLastFailedGatewayStarter(sandbox);
+      if (result) {
         lastFailed = {
-          id: starter.id,
-          command: starter.command,
-          status: starter.status,
-          exitCode: starter.exitCode,
-          stdout: logs.stdout || '',
-          stderr: logs.stderr || '',
+          id: result.process.id,
+          command: result.process.command,
+          status: result.process.status,
+          exitCode: result.process.exitCode,
+          stdout: result.logs.stdout,
+          stderr: result.logs.stderr,
         };
       }
     } catch {
@@ -119,9 +119,7 @@ debug.get('/processes', async (c) => {
       const status = d.status as string;
       const exitCode = d.exitCode as number | undefined;
       return (
-        (cmd.includes('start-openclaw.sh') || cmd.includes('start-moltbot.sh') ||
-          cmd.includes('openclaw gateway') || cmd.includes('clawdbot gateway')) &&
-        !cmd.includes('openclaw devices') && !cmd.includes('clawdbot devices') &&
+        isGatewayProcessCommand(cmd) &&
         (status === 'failed' || (status === 'completed' && exitCode != null && exitCode !== 0))
       );
     };
@@ -149,18 +147,10 @@ debug.get('/processes', async (c) => {
     // Last failed gateway stderr preview (sanitized) when logs=true or failed=1
     let lastFailedStderrPreview: string | undefined;
     if (includeLogs || failedOnly) {
-      const failedStarter = processes
-        .filter(p => (p.command.includes('start-openclaw.sh') || p.command.includes('start-moltbot.sh')) &&
-          (p.status === 'failed' || (p.status === 'completed' && p.exitCode != null && p.exitCode !== 0)))
-        .sort((a, b) => (b.startTime?.getTime() ?? 0) - (a.startTime?.getTime() ?? 0))[0];
-      if (failedStarter) {
-        try {
-          const logs = await failedStarter.getLogs();
-          const stderr = logs.stderr || '';
-          if (stderr) lastFailedStderrPreview = sanitizeStderr(stderr, 500);
-        } catch {
-          lastFailedStderrPreview = '(failed to retrieve logs)';
-        }
+      const result = await getLastFailedGatewayStarter(sandbox);
+      if (result) {
+        const stderr = result.logs.stderr;
+        if (stderr) lastFailedStderrPreview = sanitizeStderr(stderr, 500);
       }
     }
 

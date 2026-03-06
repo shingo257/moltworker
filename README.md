@@ -1,268 +1,255 @@
-# OpenClaw on Cloudflare Workers
+# OpenClaw を Cloudflare Workers で動かす（moltworker）
 
-Run [OpenClaw](https://github.com/openclaw/openclaw) (formerly Moltbot, formerly Clawdbot) personal AI assistant in a [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/).
+[OpenClaw](https://github.com/openclaw/openclaw)（旧 Moltbot / Clawdbot）という**個人用 AI アシスタント**を [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/) 上のコンテナで動作させる Cloudflare Worker です。自前サーバーなしで、Cloudflare 上で常時稼働させられます。
 
 ![moltworker architecture](./assets/logo.png)
 
-> **Experimental:** This is a proof of concept demonstrating that OpenClaw can run in Cloudflare Sandbox. It is not officially supported and may break without notice. Use at your own risk.
+> **実験的:** Cloudflare Sandbox 上で OpenClaw が動作することを示す PoC です。公式サポートはなく、予告なく動作が変わる可能性があります。自己責任で利用してください。
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cloudflare/moltworker)
 
-## Requirements
+## このプロジェクトでできること
 
-- [Workers Paid plan](https://www.cloudflare.com/plans/developer-platform/) ($5 USD/month) — required for Cloudflare Sandbox containers. Running the container incurs additional compute costs; see [Container Cost Estimate](#container-cost-estimate) below for details.
-- [Anthropic API key](https://console.anthropic.com/) — for Claude access, or you can use AI Gateway's [Unified Billing](https://developers.cloudflare.com/ai-gateway/features/unified-billing/)
+- **OpenClaw** を Cloudflare のコンテナ（Sandbox）内で起動する
+- ブラウザ用 **Control UI**（チャット画面）を Worker 経由で提供する
+- **管理画面**（`/_admin/`）でデバイス承認・R2 バックアップ・ゲートウェイ再起動を行う
+- **Telegram / Discord / Slack** と連携できる（任意）
+- **R2** を有効にすると、再起動後もペアリング・会話履歴を保持できる
 
-The following Cloudflare features used by this project have free tiers:
-- Cloudflare Access (authentication)
-- Browser Rendering (for browser navigation)
-- AI Gateway (optional, for API routing/analytics)
-- R2 Storage (optional, for persistence)
+## 必要なもの
 
-## Container Cost Estimate
+- [Workers 有料プラン](https://www.cloudflare.com/plans/developer-platform/)（月 $5）— Sandbox コンテナ利用に必須
+- [Anthropic API キー](https://console.anthropic.com/) — Claude 利用用（OpenClaw では Anthropic Pro/Max + Opus 4.6 を推奨。または [AI Gateway の Unified Billing](https://developers.cloudflare.com/ai-gateway/features/unified-billing/) を利用可）
+- ローカル開発時は **Node.js 22 以上**（コンテナ内は Node 22 を使用）
 
-This project uses a `standard-1` Cloudflare Container instance (1/2 vCPU, 4 GiB memory, 8 GB disk). Below are approximate monthly costs assuming the container runs 24/7, based on [Cloudflare Containers pricing](https://developers.cloudflare.com/containers/pricing/):
+以下の Cloudflare 機能は無料枠で利用可能です：
+- Cloudflare Access（認証）
+- Browser Rendering（ブラウザ操作）
+- AI Gateway（任意・API ルーティング／分析）
+- R2 Storage（任意・永続化）
 
-| Resource | Provisioned | Monthly Usage | Included Free | Overage | Approx. Cost |
-|----------|-------------|---------------|---------------|---------|--------------|
-| Memory | 4 GiB | 2,920 GiB-hrs | 25 GiB-hrs | 2,895 GiB-hrs | ~$26/mo |
-| CPU (at ~10% utilization) | 1/2 vCPU | ~2,190 vCPU-min | 375 vCPU-min | ~1,815 vCPU-min | ~$2/mo |
-| Disk | 8 GB | 5,840 GB-hrs | 200 GB-hrs | 5,640 GB-hrs | ~$1.50/mo |
-| Workers Paid plan | | | | | $5/mo |
-| **Total** | | | | | **~$34.50/mo** |
+## コンテナの概算コスト
 
-Notes:
-- CPU is billed on **active usage only**, not provisioned capacity. The 10% utilization estimate is a rough baseline for a lightly-used personal assistant; your actual cost will vary with usage.
-- Memory and disk are billed on **provisioned capacity** for the full time the container is running.
-- To reduce costs, configure `SANDBOX_SLEEP_AFTER` (e.g., `10m`) so the container sleeps when idle. A container that only runs 4 hours/day would cost roughly ~$5-6/mo in compute on top of the $5 plan fee.
-- Network egress, Workers/Durable Objects requests, and logs are additional but typically minimal for personal use.
-- See the [instance types table](https://developers.cloudflare.com/containers/pricing/) for other options (e.g., `lite` at 256 MiB/$0.50/mo memory or `standard-4` at 12 GiB for heavier workloads).
+`standard-1` インスタンス（1/2 vCPU、4 GiB メモリ、8 GB ディスク）を 24 時間稼働させた場合の [Cloudflare Containers 料金](https://developers.cloudflare.com/containers/pricing/)の目安です。
 
-## What is OpenClaw?
+| リソース | プロビジョン | 月間使用量 | 無料枠 | 超過分 | 概算 |
+|----------|--------------|------------|--------|--------|------|
+| メモリ | 4 GiB | 2,920 GiB-hrs | 25 GiB-hrs | 2,895 GiB-hrs | 約 $26/月 |
+| CPU（約 10% 使用時） | 1/2 vCPU | 約 2,190 vCPU-min | 375 vCPU-min | 約 1,815 vCPU-min | 約 $2/月 |
+| ディスク | 8 GB | 5,840 GB-hrs | 200 GB-hrs | 5,640 GB-hrs | 約 $1.50/月 |
+| Workers 有料プラン | — | — | — | — | $5/月 |
+| **合計** | | | | | **約 $34.50/月** |
 
-[OpenClaw](https://github.com/openclaw/openclaw) (formerly Moltbot, formerly Clawdbot) is a personal AI assistant with a gateway architecture that connects to multiple chat platforms. Key features:
+- CPU は**実際の使用量**のみ課金。メモリ・ディスクはプロビジョン分が稼働中ずっと課金されます。
+- コスト削減: `SANDBOX_SLEEP_AFTER` で無稼働後にスリープ（例: `10m`）。1 日 4 時間稼働ならコンピュートは約 $5–6/月程度になります。
+- 他のインスタンス（例: `lite` 256 MiB、`standard-4` 12 GiB）は [料金表](https://developers.cloudflare.com/containers/pricing/)を参照してください。
 
-- **Control UI** - Web-based chat interface at the gateway
-- **Multi-channel support** - Telegram, Discord, Slack
-- **Device pairing** - Secure DM authentication requiring explicit approval
-- **Persistent conversations** - Chat history and context across sessions
-- **Agent runtime** - Extensible AI capabilities with workspace and skills
+## OpenClaw とは
 
-This project packages OpenClaw to run in a [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/) container, providing a fully managed, always-on deployment without needing to self-host. Optional R2 storage enables persistence across container restarts.
+[OpenClaw](https://github.com/openclaw/openclaw)（[openclaw.ai](https://openclaw.ai)）は、**「Your own personal AI assistant. Any OS. Any Platform. The lobster way. 🦞」** を掲げる、ゲートウェイ型の個人用 AI アシスタントです。MIT ライセンスのオープンソースで、自分でホストするゲートウェイがチャットアプリと AI エージェントの橋渡しをします。
 
-## Architecture
+OpenClaw 本体は **WhatsApp、Telegram、Discord、Slack、Google Chat、Signal、iMessage、BlueBubbles、Microsoft Teams、Matrix、Zalo、WebChat** など多数のチャネルに対応しています。**moltworker** ではコンテナ内で **Telegram / Discord / Slack** の連携を設定する構成をドキュメントしています。
+
+- **Control UI** — ゲートウェイ上の Web チャット（ブラウザダッシュボード）
+- **マルチチャネル** — 1 つのゲートウェイで複数チャネルを同時に利用
+- **デバイスペアリング** — 管理画面での明示的な承認が必要（デフォルトは DM ポリシー `pairing`）
+- **会話の永続化** — 履歴・コンテキストの保持
+- **エージェント・スキル** — ワークスペースやスキルで拡張可能。ClawHub でスキルを検索・追加可能
+
+このリポジトリ（moltworker）は、OpenClaw を [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/) コンテナ用にパッケージし、自前サーバーなしで常時稼働させるための Worker です。R2 を設定すると再起動後もデータを保持できます。
+
+## アーキテクチャ
 
 ![moltworker architecture](./assets/architecture.png)
 
-## Quick Start
+## クイックスタート
 
-_Cloudflare Sandboxes are available on the [Workers Paid plan](https://dash.cloudflare.com/?to=/:account/workers/plans)._
+_Cloudflare Sandbox は [Workers 有料プラン](https://dash.cloudflare.com/?to=/:account/workers/plans) で利用できます。_
 
 ```bash
-# Install dependencies
+# 依存関係のインストール
 npm install
 
-# Set your API key (direct Anthropic access)
+# Anthropic API キーを設定（直接利用する場合）
 npx wrangler secret put ANTHROPIC_API_KEY
 
-# Or use Cloudflare AI Gateway instead (see "Optional: Cloudflare AI Gateway" below)
+# または Cloudflare AI Gateway を使う場合（後述の「Cloudflare AI Gateway」を参照）
 # npx wrangler secret put CLOUDFLARE_AI_GATEWAY_API_KEY
 # npx wrangler secret put CF_AI_GATEWAY_ACCOUNT_ID
 # npx wrangler secret put CF_AI_GATEWAY_GATEWAY_ID
 
-# Generate and set a gateway token (required for remote access)
-# Save this token - you'll need it to access the Control UI
+# ゲートウェイトークンを生成して設定（リモートアクセスに必須）
+# このトークンは Control UI アクセス時に必要なので控えておく
 export MOLTBOT_GATEWAY_TOKEN=$(openssl rand -hex 32)
 echo "Your gateway token: $MOLTBOT_GATEWAY_TOKEN"
 echo "$MOLTBOT_GATEWAY_TOKEN" | npx wrangler secret put MOLTBOT_GATEWAY_TOKEN
 
-# Deploy
+# デプロイ
 npm run deploy
 ```
 
-After deploying, open the Control UI with your token:
+デプロイ後、トークン付きで Control UI を開きます。
 
 ```
 https://your-worker.workers.dev/?token=YOUR_GATEWAY_TOKEN
 ```
 
-Replace `your-worker` with your actual worker subdomain and `YOUR_GATEWAY_TOKEN` with the token you generated above.
+`your-worker` を実際の Worker サブドメインに、`YOUR_GATEWAY_TOKEN` を上記で生成したトークンに置き換えてください。
 
-**Note:** The first request may take 1-2 minutes while the container starts.
+**注意:** 初回リクエストはコンテナ起動のため 1〜2 分かかることがあります。
 
-> **Important:** You will not be able to use the Control UI until you complete the following steps. You MUST:
-> 1. [Set up Cloudflare Access](#setting-up-the-admin-ui) to protect the admin UI
-> 2. [Pair your device](#device-pairing) via the admin UI at `/_admin/`
+> **重要:** 以下の 2 つを完了するまで Control UI は利用できません。
+> 1. [管理 UI の設定](#管理-ui-の設定) — Cloudflare Access で `/_admin/` を保護する
+> 2. [デバイスペアリング](#デバイスペアリング) — `/_admin/` でデバイスを承認する
 
-You'll also likely want to [enable R2 storage](#persistent-storage-r2) so your paired devices and conversation history persist across container restarts (optional but recommended).
+[永続ストレージ（R2）](#永続ストレージ-r2) を有効にすると、再起動後もペアリング・会話履歴が保持されます（任意だが推奨）。
 
-## Setting Up the Admin UI
+## 管理 UI の設定
 
-To use the admin UI at `/_admin/` for device management, you need to:
-1. Enable Cloudflare Access on your worker
-2. Set the Access secrets so the worker can validate JWTs
+`/_admin/` の管理画面を使うには、次が必要です。
+1. Worker で Cloudflare Access を有効にする
+2. Access 用のシークレットを設定し、Worker が JWT を検証できるようにする
 
-### 1. Enable Cloudflare Access on workers.dev
+### 1. workers.dev で Cloudflare Access を有効にする
 
-The easiest way to protect your worker is using the built-in Cloudflare Access integration for workers.dev:
+1. [Workers & Pages ダッシュボード](https://dash.cloudflare.com/?to=/:account/workers-and-pages) を開く
+2. 対象 Worker（例: `moltbot-sandbox`）を選択
+3. **Settings** → **Domains & Routes** の `workers.dev` 行の `...` をクリック
+4. **Enable Cloudflare Access** をクリック
+5. 表示された値（後で AUD タグが必要）を控える。「Manage Cloudflare Access」が 404 になる場合は無視してよい
+6. **Zero Trust** → **Access** → **Applications** で対象アプリを開き、許可するメールや IdP（Google / GitHub など）を設定
+7. そのアプリの **Application Audience (AUD)** を控える（次のステップで `CF_ACCESS_AUD` に設定）
 
-1. Go to the [Workers & Pages dashboard](https://dash.cloudflare.com/?to=/:account/workers-and-pages)
-2. Select your Worker (e.g., `moltbot-sandbox`)
-3. In **Settings**, under **Domains & Routes**, in the `workers.dev` row, click the meatballs menu (`...`)
-4. Click **Enable Cloudflare Access**
-5. Copy the values shown in the dialog (you'll need the AUD tag later). **Note:** The "Manage Cloudflare Access" link in the dialog may 404 — ignore it.
-6. To configure who can access, go to **Zero Trust** in the Cloudflare dashboard sidebar → **Access** → **Applications**, and find your worker's application:
-   - Add your email address to the allow list
-   - Or configure other identity providers (Google, GitHub, etc.)
-7. Copy the **Application Audience (AUD)** tag from the Access application settings. This will be your `CF_ACCESS_AUD` in Step 2 below
-
-### 2. Set Access Secrets
-
-After enabling Cloudflare Access, set the secrets so the worker can validate JWTs:
+### 2. Access 用シークレットの設定
 
 ```bash
-# Your Cloudflare Access team domain (e.g., "myteam.cloudflareaccess.com")
+# Cloudflare Access のチームドメイン（例: myteam.cloudflareaccess.com）
 npx wrangler secret put CF_ACCESS_TEAM_DOMAIN
 
-# The Application Audience (AUD) tag from your Access application that you copied in the step above
+# 上記で控えた Application Audience (AUD)
 npx wrangler secret put CF_ACCESS_AUD
 ```
 
-You can find your team domain in the [Zero Trust Dashboard](https://one.dash.cloudflare.com/) under **Settings** > **Custom Pages** (it's the subdomain before `.cloudflareaccess.com`).
+チームドメインは [Zero Trust ダッシュボード](https://one.dash.cloudflare.com/) の **Settings** > **Custom Pages** で確認できます（`.cloudflareaccess.com` の前のサブドメイン）。
 
-### 3. Redeploy
+### 3. 再デプロイ
 
 ```bash
 npm run deploy
 ```
 
-Now visit `/_admin/` and you'll be prompted to authenticate via Cloudflare Access before accessing the admin UI.
+これで `/_admin/` にアクセスすると、Cloudflare Access で認証後に管理画面が開きます。
 
-### Alternative: Manual Access Application
+### 手動で Access アプリを作る場合
 
-If you prefer more control, you can manually create an Access application:
+1. [Cloudflare Zero Trust ダッシュボード](https://one.dash.cloudflare.com/) → **Access** > **Applications**
+2. **Self-hosted** アプリを新規作成
+3. アプリのドメインを Worker の URL（例: `moltbot-sandbox.xxx.workers.dev`）に設定
+4. 保護するパス: `/_admin/*`, `/api/*`, `/debug/*`
+5. IdP（メール OTP、Google、GitHub など）を設定
+6. **AUD** を控え、上記のシークレットを設定
 
-1. Go to [Cloudflare Zero Trust Dashboard](https://one.dash.cloudflare.com/)
-2. Navigate to **Access** > **Applications**
-3. Create a new **Self-hosted** application
-4. Set the application domain to your Worker URL (e.g., `moltbot-sandbox.your-subdomain.workers.dev`)
-5. Add paths to protect: `/_admin/*`, `/api/*`, `/debug/*`
-6. Configure your desired identity providers (e.g., email OTP, Google, GitHub)
-7. Copy the **Application Audience (AUD)** tag and set the secrets as shown above
+### ローカル開発
 
-### Local Development
-
-For local development, create a `.dev.vars` file with:
+`.dev.vars` を作成します。
 
 ```bash
-DEV_MODE=true               # Skip Cloudflare Access auth + bypass device pairing
-DEBUG_ROUTES=true           # Enable /debug/* routes (optional)
+DEV_MODE=true               # Cloudflare Access をスキップし、デバイスペアリングもスキップ
+DEBUG_ROUTES=true           # /debug/* を有効にする（任意）
 ```
 
-## Authentication
+## 認証
 
-By default, moltbot uses **device pairing** for authentication. When a new device (browser, CLI, etc.) connects, it must be approved via the admin UI at `/_admin/`.
+OpenClaw は標準で**デバイスペアリング**を使います。新しいデバイス（ブラウザ・CLI など）は、`/_admin/` で承認されるまで接続が保留されます。
 
-### Device Pairing
+### デバイスペアリング
 
-1. A device connects to the gateway
-2. The connection is held pending until approved
-3. An admin approves the device via `/_admin/`
-4. The device is now paired and can connect freely
+1. デバイスがゲートウェイに接続する
+2. 承認されるまで接続は保留
+3. 管理者が `/_admin/` でデバイスを承認
+4. 承認後はそのデバイスから自由に接続可能
 
-This is the most secure option as it requires explicit approval for each device.
+デバイスごとの明示的な承認が必要な、もっとも安全な運用です。
 
-### Gateway Token (Required)
+### ゲートウェイトークン（必須）
 
-A gateway token is required to access the Control UI when hosted remotely. Pass it as a query parameter:
+リモートで Control UI にアクセスするには、ゲートウェイトークンが必須です。クエリで渡します。
 
 ```
 https://your-worker.workers.dev/?token=YOUR_TOKEN
 wss://your-worker.workers.dev/ws?token=YOUR_TOKEN
 ```
 
-**Note:** Even with a valid token, new devices still require approval via the admin UI at `/_admin/` (see Device Pairing above).
+**注意:** トークンが正しくても、新規デバイスは `/_admin/` での承認が必要です。
 
-For local development only, set `DEV_MODE=true` in `.dev.vars` to skip Cloudflare Access authentication and enable `allowInsecureAuth` (bypasses device pairing entirely).
+ローカル開発のみで Access やペアリングを無効にしたい場合は、`.dev.vars` で `DEV_MODE=true` にします。
 
-## Persistent Storage (R2)
+## 永続ストレージ（R2）
 
-By default, moltbot data (configs, paired devices, conversation history) is lost when the container restarts. To enable persistent storage across sessions, configure R2:
+デフォルトでは、コンテナ再起動で設定・ペアリング・会話履歴は失われます。R2 を設定するとセッションをまたいで保持できます。
 
-### 1. Create R2 API Token
+### 1. R2 API トークンの作成
 
-1. Go to **R2** > **Overview** in the [Cloudflare Dashboard](https://dash.cloudflare.com/)
-2. Click **Manage R2 API Tokens**
-3. Create a new token with **Object Read & Write** permissions
-4. Select the `moltbot-data` bucket (created automatically on first deploy)
-5. Copy the **Access Key ID** and **Secret Access Key**
+1. [Cloudflare ダッシュボード](https://dash.cloudflare.com/) の **R2** > **Overview**
+2. **Manage R2 API Tokens** をクリック
+3. **Object Read & Write** 権限のトークンを新規作成
+4. `moltbot-data` バケット（初回デプロイで自動作成）を選択
+5. **Access Key ID** と **Secret Access Key** を控える
 
-### 2. Set Secrets
+### 2. シークレットの設定
 
 ```bash
-# R2 Access Key ID
 npx wrangler secret put R2_ACCESS_KEY_ID
-
-# R2 Secret Access Key
 npx wrangler secret put R2_SECRET_ACCESS_KEY
-
-# Your Cloudflare Account ID
 npx wrangler secret put CF_ACCOUNT_ID
 ```
 
-To find your Account ID: Go to the [Cloudflare Dashboard](https://dash.cloudflare.com/), click the three dots menu next to your account name, and select "Copy Account ID".
+Account ID はダッシュボードのアカウント名横の `...` → 「Copy Account ID」で取得できます。
 
-### How It Works
+### 動作の概要
 
-R2 storage uses a backup/restore approach for simplicity:
+- **起動時:** R2 にバックアップがあれば、OpenClaw の設定ディレクトリにリストア
+- **稼働中:** 5 分ごとに設定を R2 に同期。管理画面の「Backup Now」で手動同期も可能
+- **管理画面:** R2 設定時は「Last backup: [日時]」と「Backup Now」が表示される
 
-**On container startup:**
-- If R2 is mounted and contains backup data, it's restored to the moltbot config directory
-- OpenClaw uses its default paths (no special configuration needed)
+R2 を設定しない場合も動作しますが、再起動でデータは消えます。
 
-**During operation:**
-- A cron job runs every 5 minutes to sync the moltbot config to R2
-- You can also trigger a manual backup from the admin UI at `/_admin/`
+## コンテナのライフサイクル
 
-**In the admin UI:**
-- When R2 is configured, you'll see "Last backup: [timestamp]"
-- Click "Backup Now" to trigger an immediate sync
+デフォルトはコンテナを無期限に起動したまま（`SANDBOX_SLEEP_AFTER=never`）です。コールドスタートが 1〜2 分かかるため、この運用が推奨されます。
 
-Without R2 credentials, moltbot still works but uses ephemeral storage (data lost on container restart).
-
-## Container Lifecycle
-
-By default, the sandbox container stays alive indefinitely (`SANDBOX_SLEEP_AFTER=never`). This is recommended because cold starts take 1-2 minutes.
-
-To reduce costs for infrequently used deployments, you can configure the container to sleep after a period of inactivity:
+利用頻度が低い場合は、無稼働後にスリープさせることもできます。
 
 ```bash
 npx wrangler secret put SANDBOX_SLEEP_AFTER
-# Enter: 10m (or 1h, 30m, etc.)
+# 入力例: 10m または 1h, 30m など
 ```
 
-When the container sleeps, the next request will trigger a cold start. If you have R2 storage configured, your paired devices and data will persist across restarts.
+スリープ後は次のリクエストでコールドスタートします。R2 を設定していれば、ペアリングとデータは再起動後も保持されます。
 
-## Admin UI
+## 管理 UI の機能
 
 ![admin ui](./assets/adminui.png)
 
-Access the admin UI at `/_admin/` to:
-- **R2 Storage Status** - Shows if R2 is configured, last backup time, and a "Backup Now" button
-- **Restart Gateway** - Kill and restart the moltbot gateway process
-- **Device Pairing** - View pending requests, approve devices individually or all at once, view paired devices
+`/_admin/` では次の操作ができます。
 
-The admin UI requires Cloudflare Access authentication (or `DEV_MODE=true` for local development).
+- **R2 ストレージ** — 設定状況、最終バックアップ日時、「Backup Now」ボタン
+- **ゲートウェイ再起動** — OpenClaw ゲートウェイプロセスの再起動
+- **デバイスペアリング** — 保留中のリクエスト一覧、個別／一括承認、ペアリング済みデバイス一覧
 
-## Debug Endpoints
+管理 UI の利用には Cloudflare Access 認証が必要です（ローカルでは `DEV_MODE=true` でスキップ可能）。
 
-Debug endpoints are available at `/debug/*` when enabled (requires `DEBUG_ROUTES=true` and Cloudflare Access):
+## デバッグ用エンドポイント
 
-- `GET /debug/processes` - List all container processes
-- `GET /debug/logs?id=<process_id>` - Get logs for a specific process
-- `GET /debug/version` - Get container and moltbot version info
+`DEBUG_ROUTES=true` かつ Cloudflare Access で保護されている場合、`/debug/*` が有効になります。
 
-## Optional: Chat Channels
+- `GET /debug/processes` — コンテナ内の全プロセス一覧（`?logs=true` でログ取得、`?failed=1` で失敗のみ）
+- `GET /debug/logs?id=<process_id>` — 指定プロセスのログ
+- `GET /debug/version` — コンテナ・OpenClaw のバージョン情報
+
+## オプション: チャット連携
+
+moltworker のコンテナでは **Telegram / Discord / Slack** のトークンを設定して連携できます。OpenClaw 本体は WhatsApp、Google Chat、Signal、iMessage、BlueBubbles、Microsoft Teams、Matrix、Zalo、WebChat などにも対応しています。各チャネルの詳細は [OpenClaw ドキュメント（Channels）](https://docs.openclaw.ai/) を参照してください。
 
 ### Telegram
 
@@ -286,198 +273,212 @@ npx wrangler secret put SLACK_APP_TOKEN
 npm run deploy
 ```
 
-## Optional: Browser Automation (CDP)
+## オプション: ブラウザ自動操作（CDP）
 
-This worker includes a Chrome DevTools Protocol (CDP) shim that enables browser automation capabilities. This allows OpenClaw to control a headless browser for tasks like web scraping, screenshots, and automated testing.
+Chrome DevTools Protocol (CDP) のシムにより、OpenClaw からヘッドレスブラウザを操作できます（スクレイピング、スクリーンショット、自動テストなど）。
 
-### Setup
+### 設定
 
-1. Set a shared secret for authentication:
+1. 認証用の共有シークレットを設定:
 
 ```bash
 npx wrangler secret put CDP_SECRET
-# Enter a secure random string
+# 安全なランダム文字列を入力
 ```
 
-2. Set your worker's public URL:
+2. Worker の公開 URL を設定:
 
 ```bash
 npx wrangler secret put WORKER_URL
-# Enter: https://your-worker.workers.dev
+# 例: https://your-worker.workers.dev
 ```
 
-3. Redeploy:
+3. 再デプロイ: `npm run deploy`
 
-```bash
-npm run deploy
-```
+### エンドポイント
 
-### Endpoints
+| エンドポイント | 説明 |
+|----------------|------|
+| `GET /cdp/json/version` | ブラウザバージョン |
+| `GET /cdp/json/list` | ブラウザターゲット一覧 |
+| `GET /cdp/json/new` | 新規ターゲット作成 |
+| `WS /cdp/devtools/browser/{id}` | CDP 用 WebSocket |
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /cdp/json/version` | Browser version information |
-| `GET /cdp/json/list` | List available browser targets |
-| `GET /cdp/json/new` | Create a new browser target |
-| `WS /cdp/devtools/browser/{id}` | WebSocket connection for CDP commands |
+いずれも `?secret=<CDP_SECRET>` で認証が必要です。
 
-All endpoints require authentication via the `?secret=<CDP_SECRET>` query parameter.
+## 組み込みスキル
 
-## Built-in Skills
-
-The container includes pre-installed skills in `/root/clawd/skills/`:
+コンテナ内の `/root/clawd/skills/` にスキルが同梱されています。
 
 ### cloudflare-browser
 
-Browser automation via the CDP shim. Requires `CDP_SECRET` and `WORKER_URL` to be set (see [Browser Automation](#optional-browser-automation-cdp) above).
+CDP 経由のブラウザ操作。`CDP_SECRET` と `WORKER_URL` の設定が必要です。
 
-**Scripts:**
-- `screenshot.js` - Capture a screenshot of a URL
-- `video.js` - Create a video from multiple URLs
-- `cdp-client.js` - Reusable CDP client library
+- `screenshot.js` — URL のスクリーンショット
+- `video.js` — 複数 URL から動画作成
+- `cdp-client.js` — CDP クライアントライブラリ
 
-**Usage:**
+使用例:
+
 ```bash
-# Screenshot
 node /root/clawd/skills/cloudflare-browser/scripts/screenshot.js https://example.com output.png
-
-# Video from multiple URLs
 node /root/clawd/skills/cloudflare-browser/scripts/video.js "https://site1.com,https://site2.com" output.mp4 --scroll
 ```
 
-See `skills/cloudflare-browser/SKILL.md` for full documentation.
+詳細は `skills/cloudflare-browser/SKILL.md` を参照してください。
 
-## Optional: Cloudflare AI Gateway
+## オプション: Cloudflare AI Gateway
 
-You can route API requests through [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) for caching, rate limiting, analytics, and cost tracking. OpenClaw has native support for Cloudflare AI Gateway as a first-class provider.
+[Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) 経由で API をルーティングすると、キャッシュ・レート制限・分析・コスト把握ができます。OpenClaw は AI Gateway をネイティブでサポートしています。
 
-AI Gateway acts as a proxy between OpenClaw and your AI provider (e.g., Anthropic). Requests are sent to `https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic` instead of directly to `api.anthropic.com`, giving you Cloudflare's analytics, caching, and rate limiting. You still need a provider API key (e.g., your Anthropic API key) — the gateway forwards it to the upstream provider.
+### 設定
 
-### Setup
-
-1. Create an AI Gateway in the [AI Gateway section](https://dash.cloudflare.com/?to=/:account/ai/ai-gateway/create-gateway) of the Cloudflare Dashboard.
-2. Set the three required secrets:
+1. [Cloudflare ダッシュボード](https://dash.cloudflare.com/?to=/:account/ai/ai-gateway/create-gateway) で AI Gateway を作成
+2. 次の 3 つのシークレットを設定:
 
 ```bash
-# Your AI provider's API key (e.g., your Anthropic API key).
-# This is passed through the gateway to the upstream provider.
+# AI プロバイダーの API キー（例: Anthropic）。ゲートウェイ経由でプロバイダーに渡されます
 npx wrangler secret put CLOUDFLARE_AI_GATEWAY_API_KEY
 
-# Your Cloudflare account ID
+# Cloudflare アカウント ID
 npx wrangler secret put CF_AI_GATEWAY_ACCOUNT_ID
 
-# Your AI Gateway ID (from the gateway overview page)
+# AI Gateway ID（ゲートウェイ概要ページから）
 npx wrangler secret put CF_AI_GATEWAY_GATEWAY_ID
 ```
 
-All three are required. OpenClaw constructs the gateway URL from the account ID and gateway ID, and passes the API key to the upstream provider through the gateway.
+3. 再デプロイ: `npm run deploy`
 
-3. Redeploy:
+AI Gateway を設定すると、直接の `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` より優先されます。
 
-```bash
-npm run deploy
-```
+### モデルの指定
 
-When Cloudflare AI Gateway is configured, it takes precedence over direct `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
-
-### Choosing a Model
-
-By default, AI Gateway uses Anthropic's Claude Sonnet 4.5. To use a different model or provider, set `CF_AI_GATEWAY_MODEL` with the format `provider/model-id`:
+デフォルトは Anthropic Claude Sonnet 4.5 です。別モデル・別プロバイダーにするには `CF_AI_GATEWAY_MODEL` を `provider/model-id` 形式で設定します。
 
 ```bash
 npx wrangler secret put CF_AI_GATEWAY_MODEL
-# Enter: workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
+# 例: workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
 ```
 
-This works with any [AI Gateway provider](https://developers.cloudflare.com/ai-gateway/usage/providers/):
+[AI Gateway のプロバイダー](https://developers.cloudflare.com/ai-gateway/usage/providers/) に対応しています。
 
-| Provider | Example `CF_AI_GATEWAY_MODEL` value | API key is... |
-|----------|-------------------------------------|---------------|
-| Workers AI | `workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast` | Cloudflare API token |
-| OpenAI | `openai/gpt-4o` | OpenAI API key |
-| Anthropic | `anthropic/claude-sonnet-4-5` | Anthropic API key |
-| Groq | `groq/llama-3.3-70b` | Groq API key |
+| プロバイダー | 例 | API キー |
+|--------------|-----|----------|
+| Workers AI | `workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast` | Cloudflare API トークン |
+| OpenAI | `openai/gpt-4o` | OpenAI API キー |
+| Anthropic | `anthropic/claude-sonnet-4-5` | Anthropic API キー |
+| Groq | `groq/llama-3.3-70b` | Groq API キー |
 
-**Note:** `CLOUDFLARE_AI_GATEWAY_API_KEY` must match the provider you're using — it's your provider's API key, forwarded through the gateway. You can only use one provider at a time through the gateway. For multiple providers, use direct keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) alongside the gateway config.
+**注意:** `CLOUDFLARE_AI_GATEWAY_API_KEY` は利用するプロバイダーに合わせて設定し、ゲートウェイ経由で 1 プロバイダーのみ利用できます。
 
-#### Workers AI with Unified Billing
+#### Workers AI の Unified Billing
 
-With [Unified Billing](https://developers.cloudflare.com/ai-gateway/features/unified-billing/), you can use Workers AI models without a separate provider API key — Cloudflare bills you directly. Set `CLOUDFLARE_AI_GATEWAY_API_KEY` to your [AI Gateway authentication token](https://developers.cloudflare.com/ai-gateway/configuration/authentication/) (the `cf-aig-authorization` token).
+[Unified Billing](https://developers.cloudflare.com/ai-gateway/features/unified-billing/) を使うと、別途プロバイダー API キーなしで Workers AI モデルを利用できます。`CLOUDFLARE_AI_GATEWAY_API_KEY` に [AI Gateway の認証トークン](https://developers.cloudflare.com/ai-gateway/configuration/authentication/)（`cf-aig-authorization`）を設定します。
 
-### Legacy AI Gateway Configuration
+### 従来の AI Gateway 設定
 
-The previous `AI_GATEWAY_API_KEY` + `AI_GATEWAY_BASE_URL` approach is still supported for backward compatibility but is deprecated in favor of the native configuration above.
+`AI_GATEWAY_API_KEY` + `AI_GATEWAY_BASE_URL` の組み合わせも互換のためサポートされていますが、上記のネイティブ設定を推奨します。
 
-## All Secrets Reference
+## シークレット一覧
 
-| Secret | Required | Description |
-|--------|----------|-------------|
-| `CLOUDFLARE_AI_GATEWAY_API_KEY` | Yes* | Your AI provider's API key, passed through the gateway (e.g., your Anthropic API key). Requires `CF_AI_GATEWAY_ACCOUNT_ID` and `CF_AI_GATEWAY_GATEWAY_ID` |
-| `CF_AI_GATEWAY_ACCOUNT_ID` | Yes* | Your Cloudflare account ID (used to construct the gateway URL) |
-| `CF_AI_GATEWAY_GATEWAY_ID` | Yes* | Your AI Gateway ID (used to construct the gateway URL) |
-| `CF_AI_GATEWAY_MODEL` | No | Override default model: `provider/model-id` (e.g. `workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast`). See [Choosing a Model](#choosing-a-model) |
-| `ANTHROPIC_API_KEY` | Yes* | Direct Anthropic API key (alternative to AI Gateway) |
-| `ANTHROPIC_BASE_URL` | No | Direct Anthropic API base URL |
-| `OPENAI_API_KEY` | No | OpenAI API key (alternative provider) |
-| `AI_GATEWAY_API_KEY` | No | Legacy AI Gateway API key (deprecated, use `CLOUDFLARE_AI_GATEWAY_API_KEY` instead) |
-| `AI_GATEWAY_BASE_URL` | No | Legacy AI Gateway endpoint URL (deprecated) |
-| `CF_ACCESS_TEAM_DOMAIN` | Yes* | Cloudflare Access team domain (required for admin UI) |
-| `CF_ACCESS_AUD` | Yes* | Cloudflare Access application audience (required for admin UI) |
-| `MOLTBOT_GATEWAY_TOKEN` | Yes | Gateway token for authentication (pass via `?token=` query param) |
-| `DEV_MODE` | No | Set to `true` to skip CF Access auth + device pairing (local dev only) |
-| `DEBUG_ROUTES` | No | Set to `true` to enable `/debug/*` routes |
-| `SANDBOX_SLEEP_AFTER` | No | Container sleep timeout: `never` (default) or duration like `10m`, `1h` |
-| `R2_ACCESS_KEY_ID` | No | R2 access key for persistent storage |
-| `R2_SECRET_ACCESS_KEY` | No | R2 secret key for persistent storage |
-| `CF_ACCOUNT_ID` | No | Cloudflare account ID (required for R2 storage) |
-| `TELEGRAM_BOT_TOKEN` | No | Telegram bot token |
-| `TELEGRAM_DM_POLICY` | No | Telegram DM policy: `pairing` (default) or `open` |
-| `DISCORD_BOT_TOKEN` | No | Discord bot token |
-| `DISCORD_DM_POLICY` | No | Discord DM policy: `pairing` (default) or `open` |
-| `SLACK_BOT_TOKEN` | No | Slack bot token |
-| `SLACK_APP_TOKEN` | No | Slack app token |
-| `CDP_SECRET` | No | Shared secret for CDP endpoint authentication (see [Browser Automation](#optional-browser-automation-cdp)) |
-| `WORKER_URL` | No | Public URL of the worker (required for CDP) |
+| シークレット | 必須 | 説明 |
+|--------------|------|------|
+| `CLOUDFLARE_AI_GATEWAY_API_KEY` | 条件付き* | AI プロバイダーの API キー。`CF_AI_GATEWAY_ACCOUNT_ID` と `CF_AI_GATEWAY_GATEWAY_ID` とセット |
+| `CF_AI_GATEWAY_ACCOUNT_ID` | 条件付き* | Cloudflare アカウント ID |
+| `CF_AI_GATEWAY_GATEWAY_ID` | 条件付き* | AI Gateway ID |
+| `CF_AI_GATEWAY_MODEL` | 任意 | モデル上書き。`provider/model-id` 形式 |
+| `ANTHROPIC_API_KEY` | 条件付き* | Anthropic API キー（AI Gateway の代わりに直接利用） |
+| `ANTHROPIC_BASE_URL` | 任意 | Anthropic API のベース URL |
+| `OPENAI_API_KEY` | 任意 | OpenAI API キー（別プロバイダー） |
+| `AI_GATEWAY_API_KEY` | 任意 | 従来の AI Gateway キー（非推奨） |
+| `AI_GATEWAY_BASE_URL` | 任意 | 従来の AI Gateway URL（非推奨） |
+| `CF_ACCESS_TEAM_DOMAIN` | 条件付き* | Cloudflare Access チームドメイン（管理 UI 用） |
+| `CF_ACCESS_AUD` | 条件付き* | Cloudflare Access の AUD（管理 UI 用） |
+| `MOLTBOT_GATEWAY_TOKEN` | 必須 | ゲートウェイトークン（`?token=` で渡す） |
+| `DEV_MODE` | 任意 | `true` で Access 認証・ペアリングをスキップ（ローカル用） |
+| `DEBUG_ROUTES` | 任意 | `true` で `/debug/*` を有効化 |
+| `SANDBOX_SLEEP_AFTER` | 任意 | スリープまでの無稼働時間。`never`（デフォルト）または `10m`, `1h` など |
+| `R2_ACCESS_KEY_ID` | 任意 | R2 アクセスキー |
+| `R2_SECRET_ACCESS_KEY` | 任意 | R2 シークレットキー |
+| `CF_ACCOUNT_ID` | 任意 | Cloudflare アカウント ID（R2 用） |
+| `TELEGRAM_BOT_TOKEN` | 任意 | Telegram ボットトークン |
+| `TELEGRAM_DM_POLICY` | 任意 | `pairing`（デフォルト）または `open` |
+| `DISCORD_BOT_TOKEN` | 任意 | Discord ボットトークン |
+| `DISCORD_DM_POLICY` | 任意 | `pairing` または `open` |
+| `SLACK_BOT_TOKEN` | 任意 | Slack ボットトークン |
+| `SLACK_APP_TOKEN` | 任意 | Slack アプリトークン |
+| `CDP_SECRET` | 任意 | CDP 認証用シークレット |
+| `WORKER_URL` | 任意 | Worker の公開 URL（CDP 用） |
 
-## Security Considerations
+## Cloudflare Sandbox でうまく運用するために
 
-### Authentication Layers
+moltworker は Cloudflare Sandbox 上で OpenClaw を動かすため、以下の制約と対策を押さえておくと運用しやすくなります。
 
-OpenClaw in Cloudflare Sandbox uses multiple authentication layers:
+### 本番デプロイを推奨
 
-1. **Cloudflare Access** - Protects admin routes (`/_admin/`, `/api/*`, `/debug/*`). Only authenticated users can manage devices.
+- **ローカル（`wrangler dev`）** では、Sandbox 経由の **WebSocket プロキシに制限**があり、Control UI の WebSocket が失敗することがあります。HTTP や管理画面の表示は動いても、チャットの双方向通信が不安定になる場合があります。
+- **本番にデプロイ**（`npm run deploy`）すると、WebSocket は通常どおり動作します。問題が再現する場合は本番で確認してください。
+- 参考: [Cloudflare Sandbox — WebSocket Connections](https://developers.cloudflare.com/sandbox/guides/websocket-connections/)
 
-2. **Gateway Token** - Required to access the Control UI. Pass via `?token=` query parameter. Keep this secret.
+### サブリクエスト制限対策（SANDBOX_TRANSPORT）
 
-3. **Device Pairing** - Each device (browser, CLI, chat platform DM) must be explicitly approved via the admin UI before it can interact with the assistant. This is the default "pairing" DM policy.
+Worker から Sandbox への API 呼び出し（`listProcesses`、`getLogs`、`exec` など）は、デフォルトでは **1 操作につき 1 サブリクエスト** として数えられます（Workers 有料で 1 リクエストあたり 1,000 まで）。
 
-## Troubleshooting
+このリポジトリでは **`SANDBOX_TRANSPORT = "websocket"`** を `wrangler.jsonc` の `vars` に設定しています。これにより Sandbox SDK が **1 本の WebSocket で多重化**して通信するため、サブリクエストを節約し、デバイス一覧や `/debug/processes?logs=true` など多数の操作を行うリクエストでも制限に当たりにくくなります。アプリ側のコード変更は不要です。
 
-**`npm run dev` fails with an `Unauthorized` error:** You need to enable Cloudflare Containers in the [Containers dashboard](https://dash.cloudflare.com/?to=/:account/workers/containers)
+- 参考: [Transport modes — Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/configuration/transport/)
 
-**Gateway fails to start:** Check `npx wrangler secret list` and `npx wrangler tail`
+### コールドスタートとスリープ
 
-**Config changes not working:** Edit the `# Build cache bust:` comment in `Dockerfile` and redeploy
+- **初回リクエスト**はコンテナの起動のため **1〜2 分**かかることがあります。
+- デフォルトではコンテナは **スリープしません**（`SANDBOX_SLEEP_AFTER=never`）。コールドスタートを避けたい場合はこのままで問題ありません。
+- コスト削減のために `SANDBOX_SLEEP_AFTER=10m` などでスリープさせる場合は、次のアクセスで再度コールドスタートが発生することを想定してください。R2 を有効にしていれば、再起動後もペアリング・会話履歴は保持されます。
 
-**Slow first request:** Cold starts take 1-2 minutes. Subsequent requests are faster.
+### まとめ
 
-**R2 not mounting:** Check that all three R2 secrets are set (`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `CF_ACCOUNT_ID`). Note: R2 mounting only works in production, not with `wrangler dev`.
+| 事象 | 対処 |
+|------|------|
+| ローカルで WebSocket / チャットが不安定 | 本番デプロイで確認。本番で問題なければ wrangler dev の制限と考えてよい |
+| デバイス一覧やデバッグが遅い・制限に当たりそう | `SANDBOX_TRANSPORT=websocket` を利用（本リポジトリは既定で有効） |
+| 初回だけ非常に遅い | コールドスタート（1〜2 分）は仕様。2 回目以降は速くなる |
+| Windows で exit 126 | `.gitattributes` で `*.sh` を LF に。`git config core.autocrlf input` も有効 |
 
-**Access denied on admin routes:** Ensure `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD` are set, and that your Cloudflare Access application is configured correctly.
+## セキュリティ
 
-**Devices not appearing in admin UI:** Device list commands take 10-15 seconds due to WebSocket connection overhead. Wait and refresh.
+OpenClaw は次の 3 層で認証されています。
 
-**WebSocket issues in local development:** `wrangler dev` has known limitations with WebSocket proxying through the sandbox. HTTP requests work but WebSocket connections may fail. Deploy to Cloudflare for full functionality.
+1. **Cloudflare Access** — `/_admin/`, `/api/*`, `/debug/*` を保護。認証済みユーザーのみ管理可能
+2. **ゲートウェイトークン** — Control UI アクセスに必須。`?token=` で渡す。漏らさないこと
+3. **デバイスペアリング** — 各デバイスは管理画面で明示的に承認されるまでアシスタントとやり取りできません（デフォルトの DM ポリシーは `pairing`）
 
-## Known Issues
+## トラブルシューティング
 
-### Windows: Gateway fails to start with exit code 126 (permission denied)
+**`npm run dev` が `Unauthorized` になる:** [Containers ダッシュボード](https://dash.cloudflare.com/?to=/:account/workers/containers) で Cloudflare Containers を有効にしてください。
 
-On Windows, Git may check out shell scripts with CRLF line endings instead of LF. This causes `start-openclaw.sh` to fail with exit code 126 inside the Linux container. Ensure your repository uses LF line endings — configure Git with `git config --global core.autocrlf input` or add a `.gitattributes` file with `* text=auto eol=lf`. See [#64](https://github.com/cloudflare/moltworker/issues/64) for details.
+**ゲートウェイが起動しない:** `npx wrangler secret list` と `npx wrangler tail` で確認してください。
 
-## Links
+**設定変更が反映されない:** `Dockerfile` の `# Build cache bust:` のコメントを編集してから再デプロイしてください。
 
-- [OpenClaw](https://github.com/openclaw/openclaw)
-- [OpenClaw Docs](https://docs.openclaw.ai/)
-- [Cloudflare Sandbox Docs](https://developers.cloudflare.com/sandbox/)
-- [Cloudflare Access Docs](https://developers.cloudflare.com/cloudflare-one/policies/access/)
+**初回が遅い:** コールドスタートは 1〜2 分かかります。2 回目以降は速くなります。
+
+**R2 がマウントされない:** `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `CF_ACCOUNT_ID` の 3 つが設定されているか確認してください。R2 マウントは本番環境のみで、`wrangler dev` では動作しません。
+
+**管理画面で Access 拒否される:** `CF_ACCESS_TEAM_DOMAIN` と `CF_ACCESS_AUD` が設定され、Access アプリの設定が正しいか確認してください。
+
+**管理画面にデバイスが出ない:** デバイス一覧取得は WebSocket の都合で 10〜15 秒かかります。少し待ってから再読み込みしてください。
+
+**ローカルで WebSocket が動かない:** 上記「[Cloudflare Sandbox でうまく運用するために](#cloudflare-sandbox-でうまく運用するために)」を参照。本番デプロイで問題なければ wrangler dev の既知の制限です。
+
+## 既知の問題
+
+### Windows: ゲートウェイが exit code 126 で起動しない
+
+Windows では Git がシェルスクリプトを CRLF でチェックアウトすることがあり、Linux コンテナ内の `start-openclaw.sh` が exit 126 で失敗します。リポジトリで LF を使うようにしてください（`git config --global core.autocrlf input` または `.gitattributes` に `* text=auto eol=lf`）。詳細は [issue #64](https://github.com/cloudflare/moltworker/issues/64) を参照してください。
+
+## リンク
+
+- [OpenClaw](https://github.com/openclaw/openclaw) — 本体リポジトリ（194k+ stars）
+- [openclaw.ai](https://openclaw.ai) — 公式サイト
+- [OpenClaw ドキュメント](https://docs.openclaw.ai/) — セットアップ・設定・チャネル・リモートアクセス
+- [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/) — [Transport modes](https://developers.cloudflare.com/sandbox/configuration/transport/)（WebSocket トランスポート）、[WebSocket Connections](https://developers.cloudflare.com/sandbox/guides/websocket-connections/)
+- [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/)
