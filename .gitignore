@@ -62,3 +62,6 @@ test/e2e/.dev.vars
 # Local PR / helper docs (not part of the repo)
 .pr-error-info.md
 PR-DESCRIPTION.md
+
+# npm config
+.npmrc
