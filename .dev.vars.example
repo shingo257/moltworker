@@ -36,6 +36,9 @@ MOLTBOT_GATEWAY_TOKEN=dev-token-change-in-prod
 # Optional chat channels
 # TELEGRAM_BOT_TOKEN=optional
 # DISCORD_BOT_TOKEN=optional
+# LINE (set both for LINE webhook; use https://your-worker-url/line/webhook in LINE Developers Console)
+# LINE_CHANNEL_ACCESS_TOKEN=optional
+# LINE_CHANNEL_SECRET=optional
 
 # CDP (Chrome DevTools Protocol) configuration for browser automation
 # CDP_SECRET=shared-secret-for-cdp-auth

@@ -23,7 +23,7 @@
 import { Hono } from 'hono';
 import { getSandbox, Sandbox } from '@cloudflare/sandbox';
 
-import type { AppEnv } from './types';
+import type { AppEnv, MoltbotEnv } from './types';
 import { buildSandboxOptions, MOLTBOT_PORT, validateRequiredEnv } from './config';
 import { transformErrorMessage } from './utils/ws-errors';
 import { createAccessMiddleware } from './auth';
@@ -210,14 +210,18 @@ app.all('*', async (c) => {
       console.log('[WS] URL:', url.pathname + redactedSearch);
     }
 
-    // Inject gateway token into WebSocket request if not already present.
-    // CF Access redirects strip query params, so authenticated users lose ?token=.
-    // Since the user already passed CF Access auth, we inject the token server-side.
+    // Always send the gateway token from the Worker when MOLTBOT_GATEWAY_TOKEN is set.
+    // CF Access strips query params on redirect, and the sandbox may not forward client
+    // query params to the container correctly. Using the server-side token guarantees
+    // the container receives the same token it was started with (from the same secret).
     let wsRequest = request;
-    if (c.env.MOLTBOT_GATEWAY_TOKEN && !url.searchParams.has('token')) {
+    if (c.env.MOLTBOT_GATEWAY_TOKEN) {
       const tokenUrl = new URL(url.toString());
       tokenUrl.searchParams.set('token', c.env.MOLTBOT_GATEWAY_TOKEN);
       wsRequest = new Request(tokenUrl.toString(), request);
+      console.log('[WS] Token set server-side (MOLTBOT_GATEWAY_TOKEN)');
+    } else {
+      console.log('[WS] MOLTBOT_GATEWAY_TOKEN not set; forwarding client request as-is');
     }
 
     // Get WebSocket connection to the container
@@ -249,16 +253,39 @@ app.all('*', async (c) => {
     }
 
     // Relay messages from client to container
+    // Inject gateway token into the first "connect" request if Sandbox didn't forward URL query params.
+    let connectTokenInjected = false;
     serverWs.addEventListener('message', (event) => {
+      let dataToSend: string | ArrayBuffer | Blob = event.data;
+      if (
+        !connectTokenInjected &&
+        c.env.MOLTBOT_GATEWAY_TOKEN &&
+        typeof event.data === 'string'
+      ) {
+        try {
+          const parsed = JSON.parse(event.data);
+          if (parsed.type === 'req' && parsed.method === 'connect' && parsed.params) {
+            if (!parsed.params.auth?.token) {
+              parsed.params.auth = parsed.params.auth || {};
+              parsed.params.auth.token = c.env.MOLTBOT_GATEWAY_TOKEN;
+              dataToSend = JSON.stringify(parsed);
+              connectTokenInjected = true;
+              console.log('[WS] Injected auth.token into connect request (Sandbox URL fallback)');
+            }
+          }
+        } catch {
+          // not JSON or not connect, forward as-is
+        }
+      }
       if (debugLogs) {
         console.log(
           '[WS] Client -> Container:',
-          typeof event.data,
-          typeof event.data === 'string' ? event.data.slice(0, 200) : '(binary)',
+          typeof dataToSend,
+          typeof dataToSend === 'string' ? dataToSend.slice(0, 200) : '(binary)',
         );
       }
       if (containerWs.readyState === WebSocket.OPEN) {
-        containerWs.send(event.data);
+        containerWs.send(dataToSend);
       } else if (debugLogs) {
         console.log('[WS] Container not open, readyState:', containerWs.readyState);
       }
@@ -362,4 +389,20 @@ app.all('*', async (c) => {
 
 export default {
   fetch: app.fetch,
+  async scheduled(_event: ScheduledEvent, env: MoltbotEnv, ctx: ExecutionContext): Promise<void> {
+    // Heartbeat: touch the sandbox so it doesn't sleep (e.g. when SANDBOX_SLEEP_AFTER is set).
+    // Also keeps the Durable Object warm so Telegram/webhook requests get a responsive container.
+    ctx.waitUntil(
+      (async () => {
+        try {
+          const options = buildSandboxOptions(env);
+          const sandbox = getSandbox(env.Sandbox, 'moltbot', options);
+          await sandbox.listProcesses();
+          console.log('[CRON] Keep-alive: sandbox listProcesses ok');
+        } catch (err) {
+          console.error('[CRON] Keep-alive failed:', err instanceof Error ? err.message : err);
+        }
+      })(),
+    );
+  },
 };

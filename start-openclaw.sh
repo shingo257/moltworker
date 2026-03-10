@@ -180,6 +180,7 @@ if (process.env.OPENCLAW_DEV_MODE === 'true') {
 //   workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
 //   openai/gpt-4o
 //   anthropic/claude-sonnet-4-5
+//   anthropic/claude-sonnet-4-6
 if (process.env.CF_AI_GATEWAY_MODEL) {
     const raw = process.env.CF_AI_GATEWAY_MODEL;
     const slashIdx = raw.indexOf('/');
@@ -214,6 +215,12 @@ if (process.env.CF_AI_GATEWAY_MODEL) {
         config.agents.defaults = config.agents.defaults || {};
         config.agents.defaults.model = { primary: providerName + '/' + modelId };
         console.log('AI Gateway model override: provider=' + providerName + ' model=' + modelId + ' via ' + baseUrl);
+    } else if (gwProvider === 'anthropic' && process.env.ANTHROPIC_API_KEY) {
+        // Direct Anthropic: just override the default model (e.g. anthropic/claude-sonnet-4-6)
+        config.agents = config.agents || {};
+        config.agents.defaults = config.agents.defaults || {};
+        config.agents.defaults.model = { primary: raw };
+        console.log('Direct Anthropic model override: ' + raw);
     } else {
         console.warn('CF_AI_GATEWAY_MODEL set but missing required config (account ID, gateway ID, or API key)');
     }
@@ -257,6 +264,17 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
         botToken: process.env.SLACK_BOT_TOKEN,
         appToken: process.env.SLACK_APP_TOKEN,
         enabled: true,
+    };
+}
+
+// LINE configuration (OpenClaw LINE plugin: https://docs.molt.bot/line)
+if (process.env.LINE_CHANNEL_ACCESS_TOKEN && process.env.LINE_CHANNEL_SECRET) {
+    const dmPolicy = process.env.LINE_DM_POLICY || 'pairing';
+    config.channels.line = {
+        channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
+        channelSecret: process.env.LINE_CHANNEL_SECRET,
+        enabled: true,
+        dmPolicy: dmPolicy,
     };
 }
 

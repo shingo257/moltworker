@@ -7,6 +7,8 @@
   "observability": {
     "enabled": true,
   },
+  // SANDBOX_TRANSPORT=websocket はカスタムドメイン等で "WebSocket not connected" が出る場合があるため一旦無効化
+  // "vars": { "SANDBOX_TRANSPORT": "websocket" },
   // Static assets for admin UI (built by vite)
   "assets": {
     "directory": "./dist/client",
@@ -41,6 +43,10 @@
       "max_instances": 1,
     },
   ],
+  // Cron: every 5 minutes, touch the sandbox to prevent sleep (Telegram etc. stay responsive)
+  "triggers": {
+    "crons": ["*/5 * * * *"],
+  },
   "durable_objects": {
     "bindings": [
       {

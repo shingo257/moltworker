@@ -198,13 +198,25 @@ wss://your-worker.workers.dev/ws?token=YOUR_TOKEN
 
 ### 2. シークレットの設定
 
+**CF_ACCOUNT_ID** は既に設定済みです（Account ID: `b193ddad5cdf277d3bfb6848583e4014`）。  
+あとは R2 の API トークン 2 つを設定してください。
+
+**方法 A: スクリプトで対話的に設定（推奨）**
+
+```powershell
+.\scripts\setup-r2-secrets.ps1
+```
+
+プロンプトに従い、ダッシュボードで作成した **Access Key ID** と **Secret Access Key** を貼り付けて Enter。
+
+**方法 B: 手動で設定**
+
 ```bash
 npx wrangler secret put R2_ACCESS_KEY_ID
 npx wrangler secret put R2_SECRET_ACCESS_KEY
-npx wrangler secret put CF_ACCOUNT_ID
 ```
 
-Account ID はダッシュボードのアカウント名横の `...` → 「Copy Account ID」で取得できます。
+Account ID はダッシュボードのアカウント名横の `...` → 「Copy Account ID」で取得できます（未設定の場合のみ `npx wrangler secret put CF_ACCOUNT_ID`）。
 
 ### 動作の概要
 
@@ -226,6 +238,8 @@ npx wrangler secret put SANDBOX_SLEEP_AFTER
 ```
 
 スリープ後は次のリクエストでコールドスタートします。R2 を設定していれば、ペアリングとデータは再起動後も保持されます。
+
+**Cron によるキープアライブ:** Worker に **5 分ごと**の Cron トリガー（`*/5 * * * *`）が設定されています。`scheduled()` がサンドボックスに `listProcesses()` でアクセスするため、無稼働でもサンドボックスがスリープしにくくなり、Telegram などの Webhook が 24 時間応答し続けやすくなります。Cron は `wrangler.jsonc` の `triggers.crons` で変更できます。
 
 ## 管理 UI の機能
 
@@ -249,7 +263,15 @@ npx wrangler secret put SANDBOX_SLEEP_AFTER
 
 ## オプション: チャット連携
 
-moltworker のコンテナでは **Telegram / Discord / Slack** のトークンを設定して連携できます。OpenClaw 本体は WhatsApp、Google Chat、Signal、iMessage、BlueBubbles、Microsoft Teams、Matrix、Zalo、WebChat などにも対応しています。各チャネルの詳細は [OpenClaw ドキュメント（Channels）](https://docs.openclaw.ai/) を参照してください。
+moltworker のコンテナでは **Telegram / Discord / Slack / LINE** のトークンを設定して連携できます。OpenClaw 本体は WhatsApp、Google Chat、Signal、iMessage、BlueBubbles、Microsoft Teams、Matrix、Zalo、WebChat などにも対応しています。各チャネルの詳細は [OpenClaw ドキュメント（Channels）](https://docs.openclaw.ai/) を参照してください。
+
+**外部からアクセスできる URL（Webhook 用）:**  
+ゲートウェイは Worker の背後で動いているため、**外部に公開されているのは Worker の URL** です。LINE などの Webhook には次のいずれかを使います。
+
+- カスタムドメイン: `https://er-ai-platform.er-systems.org`
+- workers.dev: `https://moltbot-sandbox.shingo257.workers.dev`
+
+例: LINE の Webhook URL は **`https://あなたのドメイン/line/webhook`**（例: `https://er-ai-platform.er-systems.org/line/webhook`）に設定します。Worker がそのパスをコンテナ内ゲートウェイにプロキシします。
 
 ### Telegram
 
@@ -272,6 +294,18 @@ npx wrangler secret put SLACK_BOT_TOKEN
 npx wrangler secret put SLACK_APP_TOKEN
 npm run deploy
 ```
+
+### LINE
+
+[LINE Developers](https://developers.line.biz/) でチャネルを作成し、Messaging API の「Webhook URL」に **`https://あなたのWorkerのURL/line/webhook`** を設定します（例: `https://er-ai-platform.er-systems.org/line/webhook`）。「Webhook の利用」をオンにしてください。
+
+```bash
+npx wrangler secret put LINE_CHANNEL_ACCESS_TOKEN
+npx wrangler secret put LINE_CHANNEL_SECRET
+npm run deploy
+```
+
+オプションで `LINE_DM_POLICY` を `pairing`（デフォルト）または `open` に設定できます。設定後、ゲートウェイを再起動し、LINE でボットにメッセージを送るとペアリング要求が `/_admin/` に表示されます。
 
 ## オプション: ブラウザ自動操作（CDP）
 
@@ -353,12 +387,25 @@ AI Gateway を設定すると、直接の `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
 
 ### モデルの指定
 
-デフォルトは Anthropic Claude Sonnet 4.5 です。別モデル・別プロバイダーにするには `CF_AI_GATEWAY_MODEL` を `provider/model-id` 形式で設定します。
+デフォルトは Anthropic Claude Sonnet 4.5 です。別モデルにするには **`CF_AI_GATEWAY_MODEL`** を `provider/model-id` 形式で設定します。
+
+- **Cloudflare AI Gateway 利用時**: ゲートウェイ経由で指定したモデルを使用します。
+- **直接 ANTHROPIC_API_KEY 利用時**: 同じく `CF_AI_GATEWAY_MODEL=anthropic/モデルID` でデフォルトモデルを上書きできます（例: Sonnet 4.6）。
 
 ```bash
 npx wrangler secret put CF_AI_GATEWAY_MODEL
-# 例: workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
+# 例（Sonnet 4.6）: anthropic/claude-sonnet-4-6
+# 例（Sonnet 4.5）: anthropic/claude-sonnet-4-5
+# 例（AI Gateway 経由）: workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
 ```
+
+**Claude Sonnet 4.6** を使う場合（Anthropic API で利用可能な場合）:
+
+```bash
+echo "anthropic/claude-sonnet-4-6" | npx wrangler secret put CF_AI_GATEWAY_MODEL
+```
+
+設定後、**ゲートウェイを再起動**すると反映されます（管理画面 `/_admin/` の「Restart Gateway」またはコンテナの再デプロイ）。
 
 [AI Gateway のプロバイダー](https://developers.cloudflare.com/ai-gateway/usage/providers/) に対応しています。
 
@@ -366,7 +413,7 @@ npx wrangler secret put CF_AI_GATEWAY_MODEL
 |--------------|-----|----------|
 | Workers AI | `workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast` | Cloudflare API トークン |
 | OpenAI | `openai/gpt-4o` | OpenAI API キー |
-| Anthropic | `anthropic/claude-sonnet-4-5` | Anthropic API キー |
+| Anthropic | `anthropic/claude-sonnet-4-5` / `anthropic/claude-sonnet-4-6` | Anthropic API キー |
 | Groq | `groq/llama-3.3-70b` | Groq API キー |
 
 **注意:** `CLOUDFLARE_AI_GATEWAY_API_KEY` は利用するプロバイダーに合わせて設定し、ゲートウェイ経由で 1 プロバイダーのみ利用できます。

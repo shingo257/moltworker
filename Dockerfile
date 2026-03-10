@@ -25,6 +25,9 @@ RUN npm install -g pnpm
 RUN npm install -g openclaw@2026.2.3 \
     && openclaw --version
 
+# Install LINE channel plugin (optional; enables LINE webhook when LINE_* env vars are set)
+RUN openclaw plugins install @openclaw/line 2>/dev/null || echo "LINE plugin not available, skip"
+
 # Create OpenClaw directories
 # Legacy .clawdbot paths are kept for R2 backup migration
 RUN mkdir -p /root/.openclaw \
@@ -32,9 +35,12 @@ RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd/skills
 
 # Copy startup script
-# Build cache bust: 2026-02-11-v30-rclone
+# Build cache bust: 2026-03-06-v32-verify-script
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
-RUN chmod +x /usr/local/bin/start-openclaw.sh
+RUN chmod +x /usr/local/bin/start-openclaw.sh \
+    && test -f /usr/local/bin/start-openclaw.sh || (echo "ERROR: start-openclaw.sh not found" && exit 1)
+# Unique layer per build so image tag changes and push is not skipped
+RUN date -Iseconds > /tmp/moltworker-build-id && cat /tmp/moltworker-build-id
 
 # Copy custom skills
 COPY skills/ /root/clawd/skills/
